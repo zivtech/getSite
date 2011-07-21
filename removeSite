@@ -1,0 +1,57 @@
+#!/usr/bin/env python
+
+# Import necessary libraries
+import os
+import sys
+import subprocess
+import optparse
+import shutil
+
+# Import Zivtech libraries
+import siteInfo
+
+def performOp(command):
+  try:
+    subprocess.call(command, shell=options.verbose)
+  except:
+    print "Operation %s failed or was unnecessary." % command
+    f = open(path, 'w')
+    f.write(content)
+    f.close()
+
+if __name__ == '__main__':
+  parser = optparse.OptionParser()
+  parser.add_option('-q', '--quiet', action = 'store_false', dest = 'verbose', default = True, help = 'Whether or not to be verbose.')
+
+  (options, args) = parser.parse_args()
+  if len(args) != 1:
+    parser.error("Please provide a valid site name.")
+    sys.exit()
+
+  siteName = args[0]
+  siteInfo = siteInfo.getSiteByName(siteName)
+  if (siteInfo['status'] == 'error'):
+    print siteInfo['message']
+
+  # Disable site
+  path = "/etc/apache2/sites-enabled/%s" % siteName
+  if os.access(path, os.F_OK):
+    disable = 'a2dissite %s' % siteName
+    performOp(disable)
+
+  # Delete vhost config file
+  path = "/etc/apache2/sites-available/%s" % siteName
+  if os.access(path, os.F_OK):
+    os.remove(path)
+  # Delete webroot
+  path = "/var/www/%s" % siteName
+  if os.access(path, os.F_OK):
+    shutil.rmtree(path)
+  # Drop the database
+  sql = "mysql -e 'drop database %s'" % siteName
+  performOp(sql)
+  # Drop the database user
+  sql = "mysql -e 'drop user \"%s\"@\"localhost\"'" % siteName
+  performOp(sql)
+  # Restart apache
+  performOp('sudo /etc/init.d/apache2 restart')

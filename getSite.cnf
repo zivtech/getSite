@@ -1,0 +1,9 @@
+[getSite]
+; This options determines whether to force use
+; of the git client on subversion repositories.
+gitStubborn=false
+; The url where the https://github.com/zivtech/extranet_dataservices
+siteInfoURL=localhost/extranet-dataservices/get-site-info
+; Set this on your site (at [yourdomain]/admin/config/services/extranet-dataservices)
+siteInfoAPIKey=change-me-plz
+

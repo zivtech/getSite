@@ -1,0 +1,225 @@
+#!/usr/bin/env python
+
+# Import necessary libraries
+import optparse
+import ConfigParser
+import subprocess
+import os
+import sys
+import datetime
+
+# Import getSite libraries
+import siteInfo
+import getIp
+import randomPassword
+import vcsHandler
+
+def createFile(path, content=''):
+  f = open(path, 'w')
+  f.write(content)
+  f.close()
+
+# Active this section if we're using accessing this 
+# directly and not from another python script.
+if __name__ == '__main__':
+  parser = optparse.OptionParser()
+  parser.add_option('-l', '--list', action = 'store_true', dest = 'list', default = False, help = 'Whether to list the available sites.')
+  parser.add_option('-q', '--quiet', action = 'store_false', dest = 'verbose', default = True, help = 'Whether or not to be verbose.')
+  parser.add_option('-L', '--location', action = 'store', dest = 'sitePath', default = False, help = 'Speficy the destination directory for this site (defaults to \'/var/www/[site name]\')')
+  parser.add_option('-p', '--path', action = 'store', dest = 'path', default = False, help = 'Speficy the destination directory for this site\'s code path (defaults to \'/var/www/sitename/release\')')
+  parser.add_option('-s', '--specify-label', action = 'store', dest = 'label', default = '', help = 'Specify what branch or tag to checkout (defaults to trunk or master depending on vcs)')
+  parser.add_option('-g', '--gitStubborn', action = 'store_true', dest = 'gitStubborn', default = False, help = 'Force the use of the git-svn bridge on subversion repositories.')
+  parser.add_option('-D', '--database-live', action = 'store_true', dest = 'databaseLive', default = False, help = 'Determines whether or not to fetch an up to date copy of the live database.')
+  parser.add_option('-F', '--files-live', action = 'store_true', dest = 'files', default = False, help = 'Determines whether or not to include the public files')
+
+(options, args) = parser.parse_args()
+config = ConfigParser.SafeConfigParser()
+
+if len(args) != 1:
+  parser.error("Please provide a valid site name.")
+
+# Get configuration from user's config file.
+try:
+  # Load our default config file and override it with 
+  # override it with # override it with the user's config file if it exists.
+  userConfigPath = os.path.expanduser('~/.getSite.cnf')
+  if os.path.isfile(userConfigPath):
+    config.read(['getSite.cnf', userConfigPath])
+  else:
+    # Read the configuration defaults.
+    # Sys.path is used so that this script can be called from anywhere.
+    config.readfp(open(sys.path[0] + '/getSite.cnf'))
+except IOError as (errno, strerror):
+    print "I/O error({0}): {1}".format(errno, strerror)
+except:
+  print sys.exc_info()[0]
+  print "Oh noes!  An invalid config file was detected!  Please fix your config file at %s" % os.path.expanduser('~/.getSite.cnf')
+  sys.exit()
+
+siteInfo.setCredentials(config.get('getSite', 'siteInfoURL'), config.get('getSite', 'siteInfoAPIKey'))
+
+if  options.list == True:
+  for siteName, siteData in siteInfo.getAllSites().iteritems(): 
+    print siteName
+  sys.exit()
+
+
+
+# Check whether we should be forcing git-svn if this is an svn repository.
+gitStubbornConfig = config.getboolean('getSite', 'gitStubborn')
+if options.gitStubborn == False and gitStubbornConfig == True:
+  gitStubborn = True
+else:
+  gitStubborn = False
+
+siteName = args[0]
+siteInfo = siteInfo.getSiteByName(siteName)
+if (siteInfo['status'] == 'error'):
+  print siteInfo['message']
+  sys.exit()
+
+siteInfo = siteInfo['data']
+# Decide whether to use the git-svn bridge or the default vcs.
+if (siteInfo['vcs'] == 'svn' and gitStubborn == True):
+  clientVCS = 'git'
+else:
+  clientVCS = siteInfo['vcs']
+
+# Set the site directory
+if options.sitePath != False:
+  sitePath = options.sitePath
+else:
+  sitePath = "/var/www/%s" % (siteName)
+
+# Set the site code path.
+if options.path != False:
+  codePath = options.sitePath + '/' + options.codePath
+elif options.label != '': 
+  codePath = "%s/%s" % (sitePath, options.label)
+else:
+  codePath = "%s/code" % (sitePath)
+
+# Determine whether we're creating this site for the first time.
+if os.path.exists(sitePath):
+  create = False
+  # If the directory exists and there is already a .svn directory, this
+  # project is being managed by .svn already, don't gitStubborn.
+  if os.path.exists("%s/.svn" % codePath):
+    gitStubborn = False
+else:
+  create = True
+
+# If we're creating this site on this server for the first time setup the basic file structure.
+# TODO: make this an autodetect rather than explicit option
+if create == True:
+  print "Creating site folder at %s" % (sitePath)
+  # Create site directory
+  os.makedirs(sitePath)
+  # Create logs folder
+  logsPath = sitePath + '/logs'
+  os.makedirs(logsPath)
+  # Create log files
+  f = open(sitePath + '/logs/access.log', 'w')
+  f.write('')
+  f.close()
+  # Create files folder
+  os.makedirs(sitePath + '/public_files')
+  os.makedirs(sitePath + '/private_files')
+  # Assign group ownership to www-data
+  subprocess.call(["chown", ":www-data", "%s/public_files" % sitePath])
+  subprocess.call(["chown", ":www-data", "%s/private_files" % sitePath])
+  # Add group write permissions to www-data
+  subprocess.call(["chmod", "g+w", "%s/public_files" % sitePath])
+  subprocess.call(["chmod", "g+w", "%s/private_files" % sitePath])
+
+if create == False:
+  print "Updating %s from the upstream Version Control System" % (siteName)
+  vcsHandler.updateFromUpstream(siteInfo['vcs'], clientVCS, codePath, siteInfo['repository'], options.verbose)
+else:
+  print "Checking out %s site from vcs repository %s into %s" % (siteName, siteInfo['repository'], codePath)
+  vcsHandler.checkoutFromUpstream(siteInfo['vcs'], clientVCS, codePath, siteInfo['repository'], options.verbose, options.label)
+
+# Create the database and user 
+if create == True:
+  sql = "mysql -e 'create database %s'" % (siteName)
+  subprocess.call(sql, shell=options.verbose)
+  # Generate a random password
+  password = randomPassword.makeRandomPassword()
+  sql = "mysql -e 'create user \"%s\"@\"localhost\" identified by \"%s\"'" % (siteName, password)
+  subprocess.call(sql, shell=options.verbose)
+  sql = "mysql -e 'grant all on %s.* to \"%s\"@\"localhost\"'" % (siteName, siteName)
+  subprocess.call(sql, shell=options.verbose)
+  sql = "mysql -e 'flush privileges'"
+  subprocess.call(sql, shell=options.verbose)
+
+if options.databaseLive == True:
+  print "Getting the live mysql database for %s" % siteName
+  dbDump = siteName + '-import-backup.sql'
+  getSQL = "ssh -t %s 'drush sql-dump --root=/var/www/%s/webroot' > %s" % (siteInfo['files host'], siteInfo['webroot'], dbDump)
+  subprocess.call(getSQL, shell=options.verbose)
+  print "Updating database %s" % (siteName)
+  updateDB = "mysql %s < %s" % (siteName, dbDump)
+  subprocess.call(updateDB, shell=options.verbose)
+  print "Cleaning up downloaded files"
+  CLEANUP = "rm %s" % (dbDump)
+  subprocess.call(CLEANUP, shell=options.verbose)
+
+pathInsideWebroot = ''
+if os.access(codePath + '/webroot', os.X_OK):
+  pathInsideWebroot = '/webroot'
+
+
+# If we're creating this site on this server for the first time, finish the setup
+if create == True:
+  print "Creating symlinks"
+  # Create files symlink
+  os.symlink(sitePath + '/public_files', codePath + pathInsideWebroot + '/sites/default/files')
+  # Get site setup assets like default settings.php files and 
+  import siteSetupAssets
+  # Create settings.php
+  settingsPath = codePath + pathInsideWebroot + "/sites/default/settings.php"  
+  settingsData = getattr(siteSetupAssets, 'makeSettingsPHPData' + siteInfo['version'])(siteName, siteName, password)
+  print "Creating settings.php file"
+  createFile(settingsPath, settingsData)
+  # Detect whether a site-settings.php file exists and add a require_once if it does.
+  if os.access(codePath + pathInsideWebroot + "/sites/default/site-settings.php", os.F_OK):
+    print 'site-settings.php detected, appending site-settings.php include to settings.php'
+    f = open(settingsPath, 'a')
+    require = "require_once '%s%s/sites/default/site-settings.php';" % (pathInsideWebroot, codePath)
+    f.write(require)
+    f.close()
+  # Create webroot symlink
+  os.symlink(codePath + pathInsideWebroot, sitePath + '/webroot')
+  # Create vhost file
+  vhostPath = "/etc/apache2/sites-available/" + siteName
+  vhostData = siteSetupAssets.makeVhostData(siteName, sitePath)
+  print "Creating vhost file"
+  # Populate/Update the database
+  createFile(vhostPath, vhostData)
+  print "Enabling site"
+  command = "a2ensite %s" % siteName
+  subprocess.call(command, shell=options.verbose)
+
+
+# If desired, get live files
+if options.files == True:
+  rsync = "rsync -varp %s:/var/www/%s/public_files/ %s" % (siteInfo['files host'], siteInfo['webroot'], sitePath + '/public_files/')
+  print "Getting public files from the live server for %s" % siteName
+  subprocess.call(rsync, shell=options.verbose)
+  # In order to not throw errors, this should be specified in the siteInfo.
+  if siteInfo['private files'] == True:
+    rsync = "rsync -varp %s:/var/www/%s/private_files %s" % (siteInfo['files host'], siteInfo['webroot'], sitePath + '/private_files')
+    print "Getting private files from the live server for %s" % siteName
+    subprocess.call(rsync, shell=options.verbose)
+
+
+if create == True:
+  # if we have a make script, run it
+  if os.access(codePath + "/make", os.X_OK):
+    print 'Make file detected, executing make file'
+    subprocess.call(codePath + '/make', shell=options.verbose)
+  # Restart apache
+  subprocess.call('sudo /etc/init.d/apache2 restart', shell=options.verbose)
+  ipAddress = getIp.getIpAddress('eth1')
+  print "Your site has been setup.  It can be accessed at '" + siteName + ".local' on the ip address '" + ipAddress  + "'.  Please modify your hosts file accordingly."
+
