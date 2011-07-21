@@ -4,11 +4,10 @@
 import os
 import sys
 import subprocess
+import ConfigParser
 import optparse
 import shutil
 
-# Import Zivtech libraries
-import siteInfo
 
 def performOp(command):
   try:
@@ -29,9 +28,6 @@ if __name__ == '__main__':
     sys.exit()
 
   siteName = args[0]
-  siteInfo = siteInfo.getSiteByName(siteName)
-  if (siteInfo['status'] == 'error'):
-    print siteInfo['message']
 
   # Disable site
   path = "/etc/apache2/sites-enabled/%s" % siteName
