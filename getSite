@@ -221,5 +221,7 @@ if create == True:
   # Restart apache
   subprocess.call('sudo /etc/init.d/apache2 restart', shell=options.verbose)
   ipAddress = getIp.getIpAddress('eth1')
-  print "Your site has been setup.  It can be accessed at '" + siteName + ".local' on the ip address '" + ipAddress  + "'.  Please modify your hosts file accordingly."
+  print "Your site has been setup.  It can be accessed at '" + siteName + ".local' on the ip address '" + ipAddress  + "'."
+  print "You can use the following command to add this to your hosts file:"
+  print "  sudo sh -c 'echo " + ipAddress + " " + siteName + " >> /etc/hosts'"
 
