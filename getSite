@@ -155,7 +155,7 @@ if create == True:
 if options.databaseLive == True:
   print "Getting the live mysql database for %s" % siteName
   dbDump = siteName + '-import-backup.sql'
-  getSQL = "ssh -t %s 'drush sql-dump --root=/var/www/%s/webroot' > %s" % (siteInfo['files host'], siteInfo['webroot'], dbDump)
+  getSQL = "ssh -C -t %s 'drush sql-dump --root=/var/www/%s/webroot' > %s" % (siteInfo['files host'], siteInfo['webroot'], dbDump)
   subprocess.call(getSQL, shell=options.verbose)
   print "Updating database %s" % (siteName)
   updateDB = "mysql %s < %s" % (siteName, dbDump)
